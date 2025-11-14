@@ -3,7 +3,7 @@
 # 🌐 **Azure Multi-Environment Infrastructure with Terraform & Azure DevOps**
 
 This repository contains a fully modular, production-ready **Infrastructure as Code (IaC)** setup for deploying Azure resources across **Dev, QA, UAT, Preprod, and Prod** environments using **Terraform**.
-Deployments can be executed:
+Deployments can be executed
 
 * **Locally** (init → validate → plan → apply)
 * **Automatically through Azure DevOps Pipelines**
