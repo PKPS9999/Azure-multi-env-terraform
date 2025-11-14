@@ -12,7 +12,7 @@ resource "azurerm_key_vault" "this" {
     object_id = var.object_id_for_access
 
     key_permissions    = ["Get", "List"]
-    secret_permissions = ["Get", "List", "Set"]
+    secret_permissions = ["Get", "List", "Set", "Delete", "Recover", "Backup", "Restore", "Purge"]
   }
 
   tags = var.tags
