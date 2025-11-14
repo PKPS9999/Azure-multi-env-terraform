@@ -1,242 +1,165 @@
 trigger:
-  branches:
-    include:
-      - main
-      - master
-
-pr:
-  branches:
-    include:
-      - main
-      - master
+- main
 
 variables:
-  tf_plan_file: 'plan.tfplan'
-  tf_plan_json: 'plan.json'
-  artifact_name: 'tfplan'
-  group: TF_CREDS
+  - group: TF_CREDS
+  - name: terraformVersion
+    value: '1.6.6'
 
-# Link a variable group in the pipeline UI named TF_CREDS (or update)
-# The TF_CREDS group should contain:
-#   ARM_CLIENT_ID (secret)
-#   ARM_CLIENT_SECRET (secret)
-#   ARM_TENANT_ID
-#   ARM_SUBSCRIPTION_ID
-# Optionally add TF_VAR_* variables here or in envs/*/terraform.tfvars
-
-pool:
-  vmImage: ubuntu-latest
 
 stages:
-  # ---------------- DEV ----------------
-  - stage: Dev
-    displayName: Deploy (Plan) - Dev
-    jobs:
-      - job: PlanDev
-        displayName: "Terraform Plan (dev)"
-        steps:
-          - script: |
-              echo "Installing Terraform..."
-              curl -L https://releases.hashicorp.com/terraform/1.7.0/terraform_1.7.0_linux_amd64.zip -o terraform.zip
-              unzip terraform.zip
-              sudo mv terraform /usr/local/bin/
-              terraform --version
-            displayName: "Install Terraform Manually"
+# -------------------------------
+# DEV ENVIRONMENT (ACTIVE)
+# -------------------------------
+- stage: DEV
+  displayName: "Terraform Deploy - DEV"
+  jobs:
+  - job: Terraform_Dev
+    displayName: "Run Terraform for Dev"
+    pool:
+      vmImage: 'ubuntu-latest'
+
+    steps:
+    - task: TerraformInstaller@1
+      displayName: "Install Terraform"
+      inputs:
+        terraformVersion: $(terraformVersion)
+
+    - task: AzureCLI@2
+      displayName: "Azure CLI Login"
+      inputs:
+        azureSubscription: "multiterra"
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          echo "Azure CLI authenticated"
+          az account show
+
+    - task: Bash@3
+      displayName: "Terraform Init - Dev"
+      inputs:
+        targetType: 'inline'
+        script: |
+          cd env/dev
+          export ARM_CLIENT_ID=$(ARM_CLIENT_ID)
+          export ARM_CLIENT_SECRET=$(ARM_CLIENT_SECRET)
+          export ARM_TENANT_ID=$(ARM_TENANT_ID)
+          export ARM_SUBSCRIPTION_ID=$(ARM_SUBSCRIPTION_ID)
+
+          terraform init
+
+    - task: Bash@3
+      displayName: "Terraform Validate - Dev"
+      inputs:
+        targetType: 'inline'
+        script: |
+          cd env/dev
+          export ARM_CLIENT_ID=$(ARM_CLIENT_ID)
+          export ARM_CLIENT_SECRET=$(ARM_CLIENT_SECRET)
+          export ARM_TENANT_ID=$(ARM_TENANT_ID)
+          export ARM_SUBSCRIPTION_ID=$(ARM_SUBSCRIPTION_ID)
+          terraform validate
+
+    - task: Bash@3
+      displayName: "Terraform Plan - Dev"
+      inputs:
+        targetType: 'inline'
+        script: |
+          cd env/dev
+          export ARM_CLIENT_ID=$(ARM_CLIENT_ID)
+          export ARM_CLIENT_SECRET=$(ARM_CLIENT_SECRET)
+          export ARM_TENANT_ID=$(ARM_TENANT_ID)
+          export ARM_SUBSCRIPTION_ID=$(ARM_SUBSCRIPTION_ID)
+          terraform plan -out=tfplan
+
+#    - task: Bash@3
+#     displayName: "Terraform Apply - Dev"
+#      inputs:
+#        targetType: 'inline'
+#        script: |
+#          cd env/dev
+#          terraform apply -auto-approve tfplan
 
 
-          - checkout: self
-
-          - script: |
-              set -euo pipefail
-              cd envs/dev
-              # export ARM credentials from pipeline variables (already loaded from variable group)
-              export ARM_CLIENT_ID=$(ARM_CLIENT_ID)
-              export ARM_CLIENT_SECRET=$(ARM_CLIENT_SECRET)
-              export ARM_TENANT_ID=$(ARM_TENANT_ID)
-              export ARM_SUBSCRIPTION_ID=$(ARM_SUBSCRIPTION_ID)
-
-              terraform --version
-              terraform init -input=false
-              terraform fmt -check || terraform fmt
-              terraform validate
-
-              # create plan artifact
-              terraform plan -input=false -out=$(System.DefaultWorkingDirectory)/envs/dev/$(tf_plan_file) -var-file=terraform.tfvars
-
-              terraform show -json $(System.DefaultWorkingDirectory)/envs/dev/$(tf_plan_file) > $(System.DefaultWorkingDirectory)/envs/dev/$(tf_plan_json)
-            displayName: 'Init/Validate/Plan (dev)'
-
-          - publish: envs/dev/$(tf_plan_json)
-            artifact: $(artifact_name)-dev
-            displayName: 'Publish plan (dev)'
-
-  # ---------------- QA ----------------
-  - stage: QA
-    displayName: Deploy (Plan) - QA
-    dependsOn: Dev
-    condition: succeeded('Dev')
-    jobs:
-      - job: PlanQA
-        displayName: "Terraform Plan (qa)"
-        steps:
-          - script: |
-              echo "Installing Terraform..."
-              curl -L https://releases.hashicorp.com/terraform/1.7.0/terraform_1.7.0_linux_amd64.zip -o terraform.zip
-              unzip terraform.zip
-              sudo mv terraform /usr/local/bin/
-              terraform --version
-            displayName: "Install Terraform Manually"
+# -----------------------------------------
+# QA ENVIRONMENT (COMMENTED / DISABLED NOW)
+# -----------------------------------------
+# - stage: QA
+#   displayName: "Terraform Deploy - QA"
+#   dependsOn: DEV
+#   condition: succeeded()
+#   jobs:
+#   - job: Terraform_QA
+#     pool:
+#       vmImage: 'ubuntu-latest'
+#     steps:
+#     - bash: |
+#         cd env/qa
+#         terraform init
+#         terraform validate
+#         terraform plan -out=tfplan
+#         terraform apply -auto-approve tfplan
+#       displayName: "Run Terraform for QA"
 
 
-          - checkout: self
-
-          - script: |
-              set -euo pipefail
-              cd envs/qa
-              export ARM_CLIENT_ID=$(ARM_CLIENT_ID)
-              export ARM_CLIENT_SECRET=$(ARM_CLIENT_SECRET)
-              export ARM_TENANT_ID=$(ARM_TENANT_ID)
-              export ARM_SUBSCRIPTION_ID=$(ARM_SUBSCRIPTION_ID)
-
-              terraform init -input=false
-              terraform fmt -check || terraform fmt
-              terraform validate
-
-              terraform plan -input=false -out=$(System.DefaultWorkingDirectory)/envs/qa/$(tf_plan_file) -var-file=terraform.tfvars
-              terraform show -json $(System.DefaultWorkingDirectory)/envs/qa/$(tf_plan_file) > $(System.DefaultWorkingDirectory)/envs/qa/$(tf_plan_json)
-            displayName: 'Init/Validate/Plan (qa)'
-
-          - publish: envs/qa/$(tf_plan_json)
-            artifact: $(artifact_name)-qa
-            displayName: 'Publish plan (qa)'
-
-  # ---------------- UAT (requires approval via Azure DevOps environment) ----------------
-  - stage: UAT
-    displayName: Deploy (Plan) - UAT (requires approval)
-    dependsOn: QA
-    condition: succeeded('QA')
-    jobs:
-      - deployment: UATPlan
-        displayName: "Terraform Plan (uat) - deployment job (use environment approvals)"
-        environment: 'uat'   # create environment 'uat' in Azure DevOps and add pre-deployment approvals if needed
-        strategy:
-          runOnce:
-            deploy:
-              steps:
-                - script: |
-                    echo "Installing Terraform..."
-                    curl -L https://releases.hashicorp.com/terraform/1.7.0/terraform_1.7.0_linux_amd64.zip -o terraform.zip
-                    unzip terraform.zip
-                    sudo mv terraform /usr/local/bin/
-                    terraform --version
-                  displayName: "Install Terraform Manually"
+# -----------------------------------------
+# UAT ENVIRONMENT (COMMENTED)
+# -----------------------------------------
+# - stage: UAT
+#   displayName: "Terraform Deploy - UAT"
+#   dependsOn: QA
+#   condition: succeeded()
+#   jobs:
+#   - job: Terraform_UAT
+#     pool:
+#       vmImage: 'ubuntu-latest'
+#     steps:
+#     - bash: |
+#         cd env/uat
+#         terraform init
+#         terraform validate
+#         terraform plan -out=tfplan
+#         terraform apply -auto-approve tfplan
+#       displayName: "Run Terraform for UAT"
 
 
-                - checkout: self
-
-                - script: |
-                    set -euo pipefail
-                    cd envs/uat
-                    export ARM_CLIENT_ID=$(ARM_CLIENT_ID)
-                    export ARM_CLIENT_SECRET=$(ARM_CLIENT_SECRET)
-                    export ARM_TENANT_ID=$(ARM_TENANT_ID)
-                    export ARM_SUBSCRIPTION_ID=$(ARM_SUBSCRIPTION_ID)
-
-                    terraform init -input=false
-                    terraform fmt -check || terraform fmt
-                    terraform validate
-
-                    terraform plan -input=false -out=$(System.DefaultWorkingDirectory)/envs/uat/$(tf_plan_file) -var-file=terraform.tfvars
-                    terraform show -json $(System.DefaultWorkingDirectory)/envs/uat/$(tf_plan_file) > $(System.DefaultWorkingDirectory)/envs/uat/$(tf_plan_json)
-                  displayName: 'Init/Validate/Plan (uat)'
-
-                - publish: envs/uat/$(tf_plan_json)
-                  artifact: $(artifact_name)-uat
-                  displayName: 'Publish plan (uat)'
-
-  # ---------------- PREPROD (requires approval) ----------------
-  - stage: Preprod
-    displayName: Deploy (Plan) - Preprod (requires approval)
-    dependsOn: UAT
-    condition: succeeded('UAT')
-    jobs:
-      - deployment: PreprodPlan
-        displayName: "Terraform Plan (preprod) - deployment job (use environment approvals)"
-        environment: 'preprod'
-        strategy:
-          runOnce:
-            deploy:
-              steps:
-                - script: |
-                    echo "Installing Terraform..."
-                    curl -L https://releases.hashicorp.com/terraform/1.7.0/terraform_1.7.0_linux_amd64.zip -o terraform.zip
-                    unzip terraform.zip
-                    sudo mv terraform /usr/local/bin/
-                    terraform --version
-                  displayName: "Install Terraform Manually"
+# -----------------------------------------
+# PREPROD ENVIRONMENT (COMMENTED)
+# -----------------------------------------
+# - stage: PREPROD
+#   displayName: "Terraform Deploy - PreProd"
+#   dependsOn: UAT
+#   condition: succeeded()
+#   jobs:
+#   - job: Terraform_PreProd
+#     pool:
+#       vmImage: 'ubuntu-latest'
+#     steps:
+#     - bash: |
+#         cd env/preprod
+#         terraform init
+#         terraform validate
+#         terraform plan -out=tfplan
+#         terraform apply -auto-approve tfplan
+#       displayName: "Run Terraform for PreProd"
 
 
-                - checkout: self
-
-                - script: |
-                    set -euo pipefail
-                    cd envs/preprod
-                    export ARM_CLIENT_ID=$(ARM_CLIENT_ID)
-                    export ARM_CLIENT_SECRET=$(ARM_CLIENT_SECRET)
-                    export ARM_TENANT_ID=$(ARM_TENANT_ID)
-                    export ARM_SUBSCRIPTION_ID=$(ARM_SUBSCRIPTION_ID)
-
-                    terraform init -input=false
-                    terraform fmt -check || terraform fmt
-                    terraform validate
-
-                    terraform plan -input=false -out=$(System.DefaultWorkingDirectory)/envs/preprod/$(tf_plan_file) -var-file=terraform.tfvars
-                    terraform show -json $(System.DefaultWorkingDirectory)/envs/preprod/$(tf_plan_file) > $(System.DefaultWorkingDirectory)/envs/preprod/$(tf_plan_json)
-                  displayName: 'Init/Validate/Plan (preprod)'
-
-                - publish: envs/preprod/$(tf_plan_json)
-                  artifact: $(artifact_name)-preprod
-                  displayName: 'Publish plan (preprod)'
-
-  # ---------------- PROD (requires approval) ----------------
-  - stage: Prod
-    displayName: Deploy (Plan) - Prod (requires approval)
-    dependsOn: Preprod
-    condition: succeeded('Preprod')
-    jobs:
-      - deployment: ProdPlan
-        displayName: "Terraform Plan (prod) - deployment job (use environment approvals)"
-        environment: 'prod'
-        strategy:
-          runOnce:
-            deploy:
-              steps:
-                - script: |
-                    echo "Installing Terraform..."
-                    curl -L https://releases.hashicorp.com/terraform/1.7.0/terraform_1.7.0_linux_amd64.zip -o terraform.zip
-                    unzip terraform.zip
-                    sudo mv terraform /usr/local/bin/
-                    terraform --version
-                  displayName: "Install Terraform Manually"
-
-                - checkout: self
-
-                - script: |
-                    set -euo pipefail
-                    cd envs/prod
-                    export ARM_CLIENT_ID=$(ARM_CLIENT_ID)
-                    export ARM_CLIENT_SECRET=$(ARM_CLIENT_SECRET)
-                    export ARM_TENANT_ID=$(ARM_TENANT_ID)
-                    export ARM_SUBSCRIPTION_ID=$(ARM_SUBSCRIPTION_ID)
-
-                    terraform init -input=false
-                    terraform fmt -check || terraform fmt
-                    terraform validate
-
-                    terraform plan -input=false -out=$(System.DefaultWorkingDirectory)/envs/prod/$(tf_plan_file) -var-file=terraform.tfvars
-                    terraform show -json $(System.DefaultWorkingDirectory)/envs/prod/$(tf_plan_file) > $(System.DefaultWorkingDirectory)/envs/prod/$(tf_plan_json)
-                  displayName: 'Init/Validate/Plan (prod)'
-
-                - publish: envs/prod/$(tf_plan_json)
-                  artifact: $(artifact_name)-prod
-                  displayName: 'Publish plan (prod)'
+# -----------------------------------------
+# PROD ENVIRONMENT (COMMENTED)
+# -----------------------------------------
+# - stage: PROD
+#   displayName: "Terraform Deploy - Prod"
+#   dependsOn: PREPROD
+#   condition: succeeded()
+#   jobs:
+#   - job: Terraform_Prod
+#     pool:
+#       vmImage: 'ubuntu-latest'
+#     steps:
+#     - bash: |
+#         cd env/prod
+#         terraform init
+#         terraform validate
+#         terraform plan -out=tfplan
+#         terraform apply -auto-approve tfplan
+#       displayName: "Run Terraform for Prod"
